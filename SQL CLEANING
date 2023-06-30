@@ -1,0 +1,175 @@
+--- DATA CLEANING FROM HOUSING
+
+SELECT * FROM Housing_price
+
+--1.STANDARDIZE THE SaleDATE AND FORMAT IT THE DATE FORMAT HAS TIME AND DATE FORMAT HERE TIME FORMAT IS NOT REQUIRED SO WE CHANGE THE TYPE USING CONVERT
+
+SELECT SaleDate FROM Housing_price
+
+select SaleDate,convert(date,SaleDate) from Housing_price
+--this code below did not work so we made alter table then updates it and put values of salesdate in converted sales date then changed the format of the datatype
+update Housing_price 
+set SaleDate=convert(date,SaleDate)
+
+Alter table Housing_price
+add SaleDateConverted Date
+
+update Housing_price 
+set SaleDateConverted=convert(date,SaleDate)
+
+select SaleDateConverted,convert(date,SaleDate) from Housing_price
+
+--2.POPULATE PROPERTY ADDRESS
+
+SELECT  PropertyAddress FROM Housing_price
+
+--total 29 records are null for property usually property address should not be null
+SELECT  * FROM Housing_price where PropertyAddress is null
+
+-- record no 44,45 have same property address for parcel id 01514006000 so here try to find a reference point so same address have the same parcel id 
+--we can check which address has a parcel id and that parcel id is identical to the name of the property address beacuse parcel id dont ahve null values so we copy paste 
+-- the same property name to identical parcel id,using join self join that is join table to itself so that it finds similarities to parcel id
+
+SELECT  * FROM Housing_price order by ParcelID
+
+--doing a self join on the table itself giving aliases a and b to housing price and intersecting parcel address of a and b where each unique id should not be same and 
+--where it should be done where property address is null and isnull is checking if null is there in a property address of a to replace it with b proeprty address
+
+select a.ParcelID,a.PropertyAddress,b.ParcelID,b.PropertyAddress,ISNULL(a.PropertyAddress,b.PropertyAddress) as "new property address"
+from Housing_price a join Housing_price b on a.ParcelID=b.ParcelID and a.[UniqueID ]<> b.[UniqueID ] where a.PropertyAddress is null
+
+--we update table a of housing price and set means assign the property address colum to new values got
+
+update a
+set PropertyAddress=ISNULL(a.PropertyAddress,b.PropertyAddress) 
+from Housing_price a join Housing_price b on a.ParcelID=b.ParcelID and a.[UniqueID ]<> b.[UniqueID ] where a.PropertyAddress is null
+
+--3.Breaking address into individual colums (address,city,state)
+
+SELECT  *FROM Housing_price
+
+SELECT  PropertyAddress FROM Housing_price
+
+--there is delimeter which is a comma to seperate,use substring and char index,here substring is the property address starting from 1  and length is the charindex
+--which searches for the , it could be any delimeter in the property address and -1 is to get values only before the comma at the end from this nashville is gone 
+--then again substring to find in property address starting position in charindex to get value after comma in property address +1 to find after comma and then 
+--take length of the  property address
+--substring(expression to find in,starting position ,length
+--charindex(expression to search,expression to be searched in,start location
+
+select substring(PropertyAddress,1,charindex(',',PropertyAddress)-1) as Address
+, SUBSTRING(PropertyAddress, CHARINDEX(',', PropertyAddress) + 1 , LEN(PropertyAddress)) as Address
+from Housing_price
+
+alter table Housing_price
+add propertysplitaddress nvarchar(225)
+
+update  Housing_price
+set propertysplitaddress=substring(PropertyAddress,1,charindex(',',PropertyAddress)-1) 
+
+alter table Housing_price
+add propertysplitcity nvarchar(225)
+
+update Housing_price
+set propertysplitcity=SUBSTRING(PropertyAddress, CHARINDEX(',', PropertyAddress) + 1 , LEN(PropertyAddress))
+
+SELECT  *FROM Housing_price
+
+---instead of using substring which is a tedious process we can use parsename lets do the same thing using parser on oqners address
+--- split owners name into city and state
+--parseanme only works for fullstop but we have comma so convert comma to fullstop then parser will help and parser usually starts from right to left so write 3,2,1 to
+--start from left to right
+
+select OwnerAddress from Housing_price
+
+select PARSENAME(replace(OwnerAddress,',','.'),3) as address
+,PARSENAME(replace(OwnerAddress,',','.'),2) as cityname
+,PARSENAME(replace(OwnerAddress,',','.'),1)as  state
+from Housing_price
+
+alter table Housing_price
+add address nvarchar(225)
+
+alter table Housing_price
+add cityname nvarchar(225)
+
+alter table Housing_price
+add state nvarchar(225)
+
+update Housing_price
+set address=PARSENAME(replace(OwnerAddress,',','.'),3) 
+
+update Housing_price
+set cityname=PARSENAME(replace(OwnerAddress,',','.'),2) 
+
+update Housing_price
+set state=PARSENAME(replace(OwnerAddress,',','.'),1)
+
+SELECT  *FROM Housing_price
+
+--4.change Y AND N to yes and no in sold as vacant
+-- HERE WE USE CASE SATEMENTS  FIRST WE COUNT THE UNIQUE VALUES IN IT AND GROUP BY THEM BY YES,NO,N,Y THEN SORT IT ACCORDING TO  COUNT COLUM IN ASC THEN WE WRITE CASES
+--USING ELSE AND UPDATE THE COLUMN TABLE WITH NEW VALUE GOT
+
+SELECT  *FROM Housing_price
+
+select distinct(SoldAsVacant),COUNT(SoldAsVacant)
+from Housing_price
+group by SoldAsVacant
+order by 2
+
+select SoldAsVacant
+, CASE when SoldAsVacant='N' then 'NO'
+       when SoldAsVacant='Y' then 'YES'
+	   else SoldAsVacant
+	   end
+from Housing_price
+
+update Housing_price
+set SoldAsVacant=CASE when SoldAsVacant='N' then 'NO'
+       when SoldAsVacant='Y' then 'YES'
+	   else SoldAsVacant
+	   end
+
+	   
+select distinct(SoldAsVacant),COUNT(SoldAsVacant)
+from Housing_price
+group by SoldAsVacant
+order by 2
+
+---REMOVE DUPLICATES
+--USE CTE AND WINDOWS FUNCTIONS partiton the data,because cant use windows when we use where so we have to use a cte,greater than 2 in row num  means there are duplicate 
+--values so we need to delete that
+
+WITH RowNumCTE as (
+select *,ROW_NUMBER() OVER (
+PARTITION BY ParcelID,PropertyAddress,SalePrice,SaleDate,LegalReference order by UniqueID )row_num
+from Housing_price
+)
+--select * from RowNumCTE
+--where row_num >1
+--order by PropertyAddress
+delete from RowNumCTE
+where row_num >1
+
+--- here there are no duplicates as rownum>1 will give no values so rownum>1 values are deleted
+WITH RowNumCTE as (
+select *,ROW_NUMBER() OVER (
+PARTITION BY ParcelID,PropertyAddress,SalePrice,SaleDate,LegalReference order by UniqueID )row_num
+from Housing_price
+)
+select * from RowNumCTE
+where row_num >1
+order by PropertyAddress
+
+-------DELETE UNUSED COLUMNS
+
+--this is mostly done on view tables not directly on table database,we can delete owner address,taxdistrict,property address,salesdate
+
+SELECT * FROM Housing_price
+
+alter table Housing_price drop column  OwnerAddress,PropertyAddress,TaxDistrict
+
+alter table Housing_price drop column  SaleDate
+
+
